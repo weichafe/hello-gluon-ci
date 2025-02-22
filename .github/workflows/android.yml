@@ -1,70 +1,45 @@
-name: Android
+name: Android Build & Upload
 
 on:
   push:
     branches: [ main ]
 
 jobs:
-  build:
+  build-android:
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
 
-      - name: Setup Gluon's GraalVM
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup GraalVM (Gluon)
         uses: gluonhq/setup-graalvm@master
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Setup Java
-        uses: actions/setup-java@v3
-        with:
-          distribution: 'temurin'
-          java-version: '21'
-
-      - name: Install libraries
+      - name: Debug Keystore Secrets
         run: |
-          sudo apt-get update
-          sudo apt install libasound2-dev libavcodec-dev libavformat-dev libavutil-dev libgl-dev libgtk-3-dev libpango1.0-dev libxtst-dev
+          if [ -z "${{ secrets.GLUON_ANDROID_KEYSTORE_BASE64 }}" ]; then
+            echo "ERROR: GLUON_ANDROID_KEYSTORE_BASE64 no está definido en GitHub Secrets."
+            exit 1
+          else
+            echo "GLUON_ANDROID_KEYSTORE_BASE64 está presente."
+          fi
 
-      - name: Setup Android Keystore
-        id: android_keystore_file
-        uses: timheuer/base64-to-file@v1
-        with:
-          fileName: 'my.keystore'
-          encodedString: ${{ secrets.GLUON_ANDROID_KEYSTORE_BASE64 }}
-
-      - name: Gluon License
-        uses: gluonhq/gluon-build-license@v1
-        with:
-          gluon-license: ${{ secrets.GLUON_LICENSE }}
-
-      - name: Gluon Build
+      - name: Decode Android Keystore
         run: |
-          export ANDROID_SDK=$ANDROID_HOME
+          echo "${{ secrets.GLUON_ANDROID_KEYSTORE_BASE64 }}" | base64 --decode > android-keystore.jks
+
+      - name: Build Android App
+        run: |
           ./mvnw -Pandroid gluonfx:build gluonfx:package
         env:
-          GLUON_ANDROID_KEYSTOREPATH: ${{ steps.android_keystore_file.outputs.filePath }}
           GLUON_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.GLUON_ANDROID_KEYSTORE_PASSWORD }}
-          GLUON_ANDROID_KEYALIAS: ${{ secrets.GLUON_ANDROID_KEYALIAS }}
-          GLUON_ANDROID_KEYALIAS_PASSWORD: ${{ secrets.GLUON_ANDROID_KEYALIAS_PASSWORD }}
+          GLUON_ANDROID_KEY_ALIAS: ${{ secrets.GLUON_ANDROID_KEY_ALIAS }}
+          GLUON_ANDROID_KEY_ALIAS_PASSWORD: ${{ secrets.GLUON_ANDROID_KEY_ALIAS_PASSWORD }}
 
-      - name: Make staging directory
-        run: mkdir staging
-
-      - name: Copy packages to staging
-        run: cp -r target/gluonfx/aarch64-android/gvm/HelloGluon.* staging
-
-      - name: Upload
-        uses: actions/upload-artifact@v4
+      - name: Upload APK to Artifacts
+        uses: actions/upload-artifact@v3
         with:
-          name: Package
-          path: staging
-
-
-      - name: Upload to Google Play
-        uses: r0adkll/upload-google-play@v1.1.1
-        with:
-          serviceAccountJsonPlainText: ${{ secrets.GLUON_ANDROID_SERVICE_ACCOUNT_JSON }}
-          packageName: com.gluonhq.samples.hellogluon
-          releaseFiles: target/gluonfx/aarch64-android/gvm/HelloGluon.aab
-          track: beta
+          name: android-apk
+          path: target/gluonfx/arm64-android/*.apk
